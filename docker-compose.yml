@@ -6,19 +6,21 @@ services:
     restart: unless-stopped
     volumes:
       - doorwatch-data:/data
+    env_file:
+      - .env
     environment:
       - DoorWatch__FrameIntervalMs=1000
       - DoorWatch__Camera__Source=Rtsp
-      - DoorWatch__Camera__RtspUrl=rtsp://user:pass@camera/stream
-      - DoorWatch__Detector__Roi__X=100
-      - DoorWatch__Detector__Roi__Y=100
-      - DoorWatch__Detector__Roi__Width=200
-      - DoorWatch__Detector__Roi__Height=200
-      - DoorWatch__Detector__ChangeThresholdPercent=10
+      - DoorWatch__Camera__RtspUrl=${RTSP_URL}
+      - DoorWatch__Detector__Roi__X=932
+      - DoorWatch__Detector__Roi__Y=80
+      - DoorWatch__Detector__Roi__Width=900
+      - DoorWatch__Detector__Roi__Height=250
+      - DoorWatch__Detector__ChangeThresholdPercent=60
       - DoorWatch__Detector__DebounceFrames=3
       - DoorWatch__Detector__BaselineImagePath=/data/baseline.png
       - DoorWatch__HomeAssistant__BaseUrl=http://192.168.1.135:8123
-      - DoorWatch__HomeAssistant__Token=REDACTED_HA_TOKEN
+      - DoorWatch__HomeAssistant__Token=${HA_TOKEN}
       - DoorWatch__HomeAssistant__EntityId=input_boolean.detected_door_state
 
 volumes:
