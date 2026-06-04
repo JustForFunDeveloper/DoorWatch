@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DoorWatch.Camera/DoorWatch.Camera.csproj" />
+    <Project Path="src/DoorWatch.Core/DoorWatch.Core.csproj" />
+    <Project Path="src/DoorWatch.HomeAssistant/DoorWatch.HomeAssistant.csproj" />
+    <Project Path="src/DoorWatch.Worker/DoorWatch.Worker.csproj" />
+  </Folder>
+</Solution>

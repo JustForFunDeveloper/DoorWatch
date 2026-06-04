@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-DoorWatch.Worker-687faaad-cbbd-4299-809f-9d01e2bc93f2</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+    <!-- Windows-only native runtime; Linux native lib is injected via Dockerfile -->
+    <PackageReference Include="OpenCvSharp4.Windows" Version="4.13.0.20260602" Condition="'$(OS)' == 'Windows_NT'" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DoorWatch.Core\DoorWatch.Core.csproj" />
+    <ProjectReference Include="..\DoorWatch.Camera\DoorWatch.Camera.csproj" />
+    <ProjectReference Include="..\DoorWatch.HomeAssistant\DoorWatch.HomeAssistant.csproj" />
+  </ItemGroup>
+</Project>

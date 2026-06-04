@@ -1,0 +1,46 @@
+# ---- .NET ----
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# ---- Secrets / config overrides ----
+appsettings.*.json
+!appsettings.Development.json
+.env
+.env.*
+
+# ---- Runtime outputs ----
+baseline.png
+snapshot.png
+
+# ---- JetBrains Rider ----
+.idea/
+*.sln.iml
+*.DotSettings.user
+
+# ---- Visual Studio ----
+.vs/
+*.aps
+*.ncb
+*.opendb
+*.sdf
+*.cachefile
+*.VC.db
+*.VC.opendb
+
+# ---- Docker ----
+docker-compose.override.yml
+
+# ---- Claude Code ----
+.claude/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
