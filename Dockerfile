@@ -1,7 +1,7 @@
 # ---- build libOpenCvSharpExtern.so from source ----
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS native-build
 
-ARG OCVSHARP_TAG=4.6.0.20221108
+ARG OCVSHARP_TAG=4.13.0.20260602
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake git build-essential \
@@ -11,11 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN git clone --depth 1 --branch ${OCVSHARP_TAG} \
     https://github.com/shimat/opencvsharp.git /opencvsharp
 
-# Ubuntu's OpenCV apt packages exclude xfeatures2d (patented SIFT/SURF algorithms).
-# We don't use any xfeatures2d functions, so remove the include and its source file.
+# Ubuntu's apt OpenCV (4.6) is missing APIs used by these wrapper modules:
+#   xfeatures2d  — patented SIFT/SURF, excluded from apt builds
+#   barcode      — cv::barcode::BarcodeDetector added in OpenCV 4.8+
+#   aruco        — ArucoDetector/CharucoDetector/RefineParameters added in OpenCV 4.7+
+# None of these are used by DoorWatch, so remove them before building.
 RUN sed -i '/#include <opencv2\/xfeatures2d.hpp>/d' \
         /opencvsharp/src/OpenCvSharpExtern/include_opencv.h \
-    && rm -f /opencvsharp/src/OpenCvSharpExtern/xfeatures2d.cpp
+    && rm -f /opencvsharp/src/OpenCvSharpExtern/xfeatures2d.cpp \
+             /opencvsharp/src/OpenCvSharpExtern/barcode.cpp \
+             /opencvsharp/src/OpenCvSharpExtern/aruco.cpp
 
 RUN cmake -S /opencvsharp/src/OpenCvSharpExtern \
           -B /opencvsharp/build \
@@ -49,10 +54,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopencv-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=native-build /opencvsharp/build/libOpenCvSharpExtern.so /usr/local/lib/
-RUN ldconfig
-
 COPY --from=build /app/publish .
+COPY --from=native-build /opencvsharp/build/libOpenCvSharpExtern.so /app/
+
+# Tell the OS dynamic linker to search /app so dlopen finds libOpenCvSharpExtern.so.
+ENV LD_LIBRARY_PATH=/app
 
 VOLUME ["/data"]
 

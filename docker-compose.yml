@@ -9,6 +9,7 @@ services:
     env_file:
       - .env
     environment:
+      - TZ=Europe/Berlin
       - DoorWatch__FrameIntervalMs=1000
       - DoorWatch__Camera__Source=Rtsp
       - DoorWatch__Camera__RtspUrl=${RTSP_URL}

@@ -2,29 +2,39 @@
 
 A .NET 10 Worker Service that watches a camera feed and automatically triggers a Home Assistant service whenever a sliding door opens or closes.
 
-It uses **pixel-difference detection** — no ML model, no cloud dependency. A region of interest (ROI) in the camera frame is compared against a reference image frame by frame. When enough pixels change, the door is considered open and Home Assistant is called.
+It uses **computer-vision detection** — no ML model, no cloud dependency. A region of interest (ROI) in the camera frame is compared against a reference image frame by frame using one of two configurable methods. Both scores are always computed and logged; a single setting decides which one drives the door-state decision.
+
+---
+
+## Detection methods
+
+### PixelDiff (default)
+Converts both the current frame and the baseline to greyscale, applies **CLAHE** contrast normalisation to both, then counts the percentage of pixels whose absolute difference exceeds a fixed threshold. CLAHE makes the score robust to gradual lighting drift (e.g. time-of-day brightness changes) that would inflate a raw pixel diff.
+
+### EdgeBased
+Runs **Canny edge detection** on both frames, diffs the two edge maps, and reports the percentage of the ROI that shows edge changes. Because edges capture structural boundaries rather than absolute brightness, this method is largely insensitive to lighting changes — a light switching on moves every pixel value but doesn't change where the door frame edge is.
+
+Both methods only look inside the configured ROI. The rest of the frame is never touched.
 
 ---
 
 ## How it works
 
 ```
-Camera (USB / RTSP)
+Camera (USB / RTSP over TCP)
        │
        ▼
-  Capture frame
+  Background grab thread  ──► latest frame (non-blocking)
+       │
+       ▼  (every FrameIntervalMs)
+  Crop ROI  ──────────────────────────────────────────────┐
+       │                                                   │
+       ▼                                             Baseline image
+  PixelDiff score  (CLAHE + absdiff + threshold)     (first frame /
+  EdgeDiff score   (Canny + absdiff)                  saved to disk)
        │
        ▼
-  Crop ROI  ──────────────────────────────────────┐
-       │                                           │
-       ▼                                     Baseline image
-  Convert to greyscale                       (first frame /
-       │                                      saved to disk)
-       ▼
-  Absolute pixel diff
-       │
-       ▼
-  % changed pixels ≥ threshold?
+  Active method score ≥ threshold?
        │
     yes│  no
        │   └──► DoorState = Closed
@@ -44,10 +54,11 @@ Camera (USB / RTSP)
 ```
 
 1. **Baseline** — on first run the app saves the current frame as `baseline.png` (door assumed closed). Delete this file any time to force a re-capture.
-2. **ROI** — only the configured rectangle is analysed, ignoring the rest of the frame (movement outside the door area is ignored).
-3. **Threshold** — `ChangeThresholdPercent` controls sensitivity. Lower it if the door is missed; raise it if light changes cause false triggers.
-4. **Debounce** — `DebounceFrames` consecutive frames must agree before state is committed, preventing single-frame flicker from triggering HA.
-5. **Home Assistant** — only called on state *change* (open→closed or closed→open), never on every frame.
+2. **ROI** — only the configured rectangle is analysed; movement outside the door area is ignored.
+3. **Method** — set `Detector.Method` to `PixelDiff` or `EdgeBased`. Both scores appear in every log line regardless of which drives the decision.
+4. **Thresholds** — each method has its own threshold because their score scales differ. `ChangeThresholdPercent` applies to PixelDiff; `EdgeChangeThresholdPercent` applies to EdgeBased.
+5. **Debounce** — `DebounceFrames` consecutive frames must agree before state is committed, preventing single-frame flicker from triggering HA.
+6. **Home Assistant** — only called on state *change* (open→closed or closed→open), never on every frame.
 
 ---
 
@@ -62,12 +73,13 @@ DoorWatch/
 └── src/
     ├── DoorWatch.Core/                  # pure models & interfaces, no framework deps
     │   ├── DoorState.cs                 # enum: Unknown / Closed / Open
-    │   ├── DetectionResult.cs           # record: state + changed% + timestamp
-    │   ├── DetectorConfig.cs            # ROI, threshold, debounce, baseline path
+    │   ├── DetectionMethod.cs           # enum: PixelDiff / EdgeBased
+    │   ├── DetectionResult.cs           # record: state + pixelDiff% + edgeDiff% + timestamp
+    │   ├── DetectorConfig.cs            # ROI, method, thresholds, debounce, baseline path
     │   └── IDoorDetector.cs
     ├── DoorWatch.Camera/                # OpenCvSharp4
     │   ├── CameraConfig.cs              # USB device index or RTSP URL
-    │   └── PixelDifferenceDetector.cs   # frame capture + diff logic
+    │   └── PixelDifferenceDetector.cs   # background grab thread + both detection methods
     ├── DoorWatch.HomeAssistant/         # HttpClient
     │   ├── HomeAssistantConfig.cs       # base URL, token, entity ID
     │   ├── IHomeAssistantClient.cs
@@ -95,8 +107,10 @@ All settings live in `appsettings.json`. Every key can be overridden with an env
       "RtspUrl": ""
     },
     "Detector": {
+      "Method": "PixelDiff",
       "Roi": { "X": 100, "Y": 100, "Width": 200, "Height": 200 },
       "ChangeThresholdPercent": 10.0,
+      "EdgeChangeThresholdPercent": 5.0,
       "DebounceFrames": 3,
       "BaselineImagePath": "/data/baseline.png"
     },
@@ -111,12 +125,14 @@ All settings live in `appsettings.json`. Every key can be overridden with an env
 
 | Key | Description |
 |---|---|
-| `FrameIntervalMs` | How often a frame is captured and analysed (ms) |
+| `FrameIntervalMs` | How often a captured frame is analysed (ms) |
 | `Camera.Source` | `Usb` or `Rtsp` |
 | `Camera.DeviceIndex` | USB camera index (`0` = first camera) |
 | `Camera.RtspUrl` | Full RTSP URL including credentials |
+| `Detector.Method` | `PixelDiff` or `EdgeBased` — which score drives the door state |
 | `Detector.Roi` | Rectangle (X, Y, Width, Height) in pixels to analyse |
-| `Detector.ChangeThresholdPercent` | Minimum % of changed pixels to consider door open |
+| `Detector.ChangeThresholdPercent` | Minimum % of changed pixels to consider door open (PixelDiff) |
+| `Detector.EdgeChangeThresholdPercent` | Minimum % of edge-change pixels to consider door open (EdgeBased) |
 | `Detector.DebounceFrames` | Consecutive frames that must agree before state commits |
 | `Detector.BaselineImagePath` | Where to save/load the reference (closed) image |
 | `HomeAssistant.BaseUrl` | HA instance URL |
@@ -196,10 +212,13 @@ The domain is derived from the `EntityId` setting automatically, so pointing at 
 
 The `Dockerfile` uses a multi-stage build:
 
-1. **Build stage** — restores and publishes the app inside a Linux SDK container (Windows `obj/` folders are excluded via `.dockerignore` to avoid Windows NuGet path conflicts).
-2. **Runtime stage** — installs the OpenCV system libraries via `apt` and downloads `libOpenCvSharpExtern.so` from the [OpenCvSharp GitHub releases](https://github.com/shimat/opencvsharp/releases).
+1. **native-build stage** — installs the system OpenCV via `apt`, checks out the OpenCvSharp source at `OCVSHARP_TAG`, and compiles `libOpenCvSharpExtern.so` from source with CMake.
+2. **build stage** — restores and publishes the .NET app (Windows `obj/` folders are excluded via `.dockerignore` to avoid NuGet path conflicts).
+3. **runtime stage** — installs the system OpenCV runtime libs, copies in the compiled `.so` and the published app.
 
-**Important:** The `OCVSHARP_VERSION` build argument in the Dockerfile must match the `OpenCvSharp4` NuGet package version used in the project (currently `4.13.0.20260602`). If the GitHub release asset for that exact version does not exist, pick the nearest available release tag.
+**Important:** The `OCVSHARP_TAG` build argument in the Dockerfile must match the `OpenCvSharp4` NuGet package version used in the project (currently `4.13.0.20260602`). It is used to check out the matching OpenCvSharp source tag before compiling the native wrapper against the system OpenCV. If that exact tag does not exist in the repo, pick the nearest available tag.
+
+The apt-provided OpenCV (4.6 on Ubuntu 24.04) is missing some APIs wrapped by OpenCvSharp 4.13 (`cv::barcode::BarcodeDetector`, `cv::aruco::ArucoDetector`, etc.). The Dockerfile removes those wrapper source files (`barcode.cpp`, `aruco.cpp`, `xfeatures2d.cpp`) before compiling since DoorWatch does not use any of them.
 
 ---
 
@@ -227,14 +246,19 @@ dotnet restore
 **`Unable to load shared library 'OpenCvSharpExtern'` in Docker**
 The native bridge library was not found. Check that the `OCVSHARP_VERSION` in the Dockerfile matches a release tag that actually has a `Ubuntu.22.04-x64.zip` asset on the GitHub releases page.
 
+**H.264 decode errors in the log (`error while decoding MB …`)**
+These appear when RTSP frames arrive corrupted due to UDP packet loss. The app forces TCP transport automatically for RTSP streams, which should eliminate them. If they persist, verify the camera is reachable with low latency and check the RTSP URL with VLC first.
+
 **Camera not opening**
 - USB: check `DeviceIndex` (0 = `/dev/video0`). In Docker the device must be mapped in `docker-compose.yml`.
 - RTSP: verify the URL and credentials with VLC first (`Media → Open Network Stream`).
 
 **Door state never changes**
 - Run `--snapshot` and confirm the ROI rectangle sits over the door gap.
-- Lower `ChangeThresholdPercent` if changes are being missed.
-- Raise it if lighting variation is causing false triggers.
+- Check the debug logs — both `PixelDiff` and `EdgeDiff` scores are logged on every frame, which helps identify whether the scores are moving at all.
+- **PixelDiff**: lower `ChangeThresholdPercent` if changes are missed; raise it if lighting variation causes false triggers.
+- **EdgeBased**: lower `EdgeChangeThresholdPercent` if changes are missed. A typical resting value is 1–5%; a clear door open/close event usually moves it to 15–40% depending on the ROI.
+- Try switching `Method` between `PixelDiff` and `EdgeBased` — the logs show both scores at all times so you can compare them without restarting.
 - Delete `baseline.png` to recapture the reference with the door closed.
 
 **Light/switch turns on immediately on startup**

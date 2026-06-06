@@ -2,5 +2,6 @@ namespace DoorWatch.Core;
 
 public record DetectionResult(
     DoorState State,
-    double ChangedPercent,
+    double PixelDiffPercent,
+    double EdgeChangedPercent,
     DateTimeOffset Timestamp);

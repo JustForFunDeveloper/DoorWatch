@@ -35,13 +35,15 @@ public sealed class DoorWatchWorker : BackgroundService
                 var result = _detector.Detect();
 
                 if (result.State != DoorState.Unknown)
-                    _logger.LogDebug("State: {State}, Changed: {Pct:F1}%", result.State, result.ChangedPercent);
+                    _logger.LogDebug(
+                        "State: {State} | PixelDiff: {PixelPct:F1}% | EdgeDiff: {EdgePct:F1}%",
+                        result.State, result.PixelDiffPercent, result.EdgeChangedPercent);
 
                 if (result.State != _lastReportedState && result.State != DoorState.Unknown)
                 {
                     _logger.LogInformation(
-                        "Door state changed: {Old} → {New} ({Pct:F1}% pixels changed)",
-                        _lastReportedState, result.State, result.ChangedPercent);
+                        "Door state changed: {Old} → {New} | PixelDiff: {PixelPct:F1}% | EdgeDiff: {EdgePct:F1}%",
+                        _lastReportedState, result.State, result.PixelDiffPercent, result.EdgeChangedPercent);
 
                     await _haClient.UpdateDoorStateAsync(result.State, stoppingToken);
                     _lastReportedState = result.State;
