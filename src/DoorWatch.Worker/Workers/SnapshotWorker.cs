@@ -31,7 +31,9 @@ public sealed class SnapshotWorker : BackgroundService
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        string outputPath = Path.GetFullPath("snapshot.png");
+        string outputPath = Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(_detectorConfig.BaselineImagePath)) ?? ".",
+            "snapshot.png");
 
         using var capture = _cameraConfig.Source == CameraSourceType.Rtsp
             ? new VideoCapture(_cameraConfig.RtspUrl)

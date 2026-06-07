@@ -17,6 +17,7 @@ It uses **computer-vision detection** — no ML model, no cloud dependency. A re
   - [2. Create a Home Assistant long-lived access token](#2-create-a-home-assistant-long-lived-access-token)
   - [3. Run locally](#3-run-locally)
   - [4. Run in Docker](#4-run-in-docker)
+- [Docker commands](#docker-commands)
 - [Deployment](#deployment)
 - [Home Assistant integration](#home-assistant-integration)
 - [Docker notes](#docker-notes)
@@ -169,13 +170,26 @@ All settings live in `appsettings.json`. Every key can be overridden with an env
 
 ### 1. Find your ROI
 
-You need the pixel coordinates of the area in the camera frame where the door gap appears. Use the built-in snapshot mode:
+You need the pixel coordinates of the area in the camera frame where the door gap appears. Use the built-in snapshot mode — it connects to the camera, grabs one frame, draws the current ROI as a red rectangle, logs the full frame resolution, and saves `snapshot.png`.
 
+**Locally:**
 ```bash
 dotnet run --project src/DoorWatch.Worker -- --snapshot
 ```
+`snapshot.png` is saved next to the executable.
 
-This connects to the camera, grabs one frame, draws the **current ROI** as a red rectangle on it, and saves `snapshot.png` next to the executable. It also logs the full frame resolution.
+**In Docker** (image must already be built):
+```bash
+docker compose run --rm doorwatch --snapshot
+```
+This starts a temporary container alongside the main one (the running container is unaffected), runs the snapshot worker, saves `/data/snapshot.png` into the shared volume, and the container removes itself on exit.
+
+Copy the file to your machine:
+```bash
+docker cp $(docker compose ps -q doorwatch):/data/snapshot.png ./snapshot.png
+```
+
+---
 
 Open `snapshot.png` in any image editor. In **Windows Paint** the pixel position is shown in the status bar as you hover. In **Paint.NET** or **GIMP** it is shown in the bottom toolbar.
 
@@ -212,6 +226,81 @@ docker compose up --build
 ```
 
 Configuration is passed via environment variables in `docker-compose.yml`. The baseline image is stored in a named Docker volume (`doorwatch-data`) and survives container restarts.
+
+---
+
+## Docker commands
+
+### Start the detection loop
+```bash
+docker compose up --build         # build image and start in foreground
+docker compose up -d --build      # same, detached (background)
+docker compose logs -f doorwatch  # follow logs of a running container
+```
+
+### Snapshot mode
+Starts a one-off container from the same image, runs `SnapshotWorker`, saves `/data/snapshot.png` into the shared volume, and removes itself on exit. The main running container is not affected.
+
+```bash
+docker compose run --rm doorwatch --snapshot
+```
+
+Copy the snapshot to your local machine afterwards:
+```bash
+docker cp $(docker compose ps -q doorwatch):/data/snapshot.png ./snapshot.png
+```
+
+### Reset the baseline
+Deletes `baseline.png` from the data volume so it is re-captured on the next startup (door must be closed at that moment):
+```bash
+docker compose exec doorwatch rm /data/baseline.png
+docker compose restart doorwatch
+```
+
+### Stop and clean up
+```bash
+docker compose down      # stop and remove containers
+docker compose down -v   # also delete the data volume (loses baseline and snapshot!)
+```
+
+---
+
+## Deployment
+
+For production, DoorWatch runs on a dedicated Ubuntu server (e.g. a mini-PC on the local network). The full server setup guide — Docker installation, Portainer, SSH key setup, `.env` file, and first deploy — is in **[DEPLOYMENT.md](DEPLOYMENT.md)**.
+
+### Daily workflow
+
+Deployment is a single click from Rider via an External Tools entry, or one command from any shell:
+
+```bash
+bash deploy.sh
+```
+
+`deploy.sh` does the following in one shot:
+
+1. Creates a compressed archive of the project (excludes `.git`, `bin/`, `obj/`)
+2. Copies it to the server via `scp`
+3. Extracts it into `/opt/doorwatch` on the server
+4. Runs `docker compose up -d --build` on the server
+5. Tails the last 20 log lines so you can confirm the container started correctly
+
+Edit the `SERVER` and `REMOTE_DIR` variables at the top of `deploy.sh` to match your server.
+
+### Secrets on the server
+
+Secrets are never stored in the image. On the server, create `/opt/doorwatch/.env` once:
+
+```env
+RTSP_URL=rtsp://user:pass@192.168.1.x/stream
+HA_TOKEN=your_long_lived_access_token
+```
+
+```bash
+chmod 600 /opt/doorwatch/.env
+```
+
+`docker-compose.yml` picks these up automatically via the `env_file` directive. The first build takes 10–15 minutes because OpenCV is compiled from source; subsequent builds use Docker's layer cache and are much faster.
 
 ---
 
