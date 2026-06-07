@@ -6,6 +6,25 @@ It uses **computer-vision detection** — no ML model, no cloud dependency. A re
 
 ---
 
+## Table of contents
+
+- [Detection methods](#detection-methods)
+- [How it works](#how-it-works)
+- [Project structure](#project-structure)
+- [Configuration](#configuration)
+- [Getting started](#getting-started)
+  - [1. Find your ROI](#1-find-your-roi)
+  - [2. Create a Home Assistant long-lived access token](#2-create-a-home-assistant-long-lived-access-token)
+  - [3. Run locally](#3-run-locally)
+  - [4. Run in Docker](#4-run-in-docker)
+- [Deployment](#deployment)
+- [Home Assistant integration](#home-assistant-integration)
+- [Docker notes](#docker-notes)
+- [Prerequisites](#prerequisites)
+- [Troubleshooting](#troubleshooting)
+
+---
+
 ## Detection methods
 
 ### PixelDiff (default)

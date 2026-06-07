@@ -1,4 +1,13 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+    <File Path="DEPLOYMENT.md" />
+    <File Path="Dockerfile" />
+    <File Path="docker-compose.yml" />
+    <File Path=".env.example" />
+    <File Path="Directory.Build.props" />
+    <File Path="deploy.sh" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/DoorWatch.Camera/DoorWatch.Camera.csproj" />
     <Project Path="src/DoorWatch.Core/DoorWatch.Core.csproj" />

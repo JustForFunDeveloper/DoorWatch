@@ -1,8 +1,10 @@
-Hier ist die komplette Schritt-für-Schritt Anleitung:Klicke auf die Boxen für Details. Hier ist die vollständige Schritt-für-Schritt Anleitung:
+# Deployment Guide
+
+Step-by-step instructions for setting up DoorWatch on a dedicated Ubuntu server.
 
 ---
 
-## Schritt 1 — Ubuntu vorbereiten
+## Step 1 — Prepare Ubuntu
 
 ```bash
 sudo apt update && sudo apt upgrade -y
@@ -11,22 +13,22 @@ sudo apt install -y curl git rsync
 
 ---
 
-## Schritt 2 — Docker installieren
+## Step 2 — Install Docker
 
 ```bash
 curl -fsSL https://get.docker.com | sh
 
-#Enter correct user instead of $USER
+# Replace $USER with your actual username if needed
 sudo usermod -aG docker $USER
 newgrp docker
 
-# Prüfen ob es funktioniert
+# Verify it works
 docker compose version
 ```
 
 ---
 
-## Schritt 3 — Projektordner anlegen
+## Step 3 — Create the project directory
 
 ```bash
 sudo mkdir -p /opt/doorwatch
@@ -35,7 +37,7 @@ sudo chown $USER:$USER /opt/doorwatch
 
 ---
 
-## Schritt 4 — Portainer installieren
+## Step 4 — Install Portainer
 
 ```bash
 docker volume create portainer_data
@@ -49,75 +51,52 @@ docker run -d \
   portainer/portainer-ce:latest
 ```
 
-Dann im Browser auf deinem Windows-PC: `http://<ubuntu-ip>:9000` → Admin-User anlegen → "Get Started" → Local.
+Open `http://<ubuntu-ip>:9000` in your browser → create an admin user → Get Started → Local.
 
 ---
 
-## Schritt 5 — SSH Key einrichten (einmalig)
+## Step 5 — Set up SSH key (one-time)
 
-Auf dem Windows-PC in PowerShell:
+On your Windows PC in PowerShell:
 
 ```powershell
 ssh-keygen -t ed25519 -C "rider-deploy"
 ssh-copy-id user@192.168.1.x
 ```
 
-Ab jetzt kein Passwort mehr beim SSH nötig.
+After this, SSH connections to the server require no password.
 
 ---
 
-## Schritt 6 — deploy.sh im Projekt anlegen
+## Step 6 — Configure deploy.sh
 
-Datei `deploy.sh` im Root deines Projekts (neben `docker-compose.yml`):
+Edit `deploy.sh` at the project root and set the `SERVER` and `REMOTE_DIR` variables at the top to match your server:
 
 ```bash
-#!/bin/bash
-set -e
-
 SERVER="user@192.168.1.x"
 REMOTE_DIR="/opt/doorwatch"
-
-echo "📦 Erstelle Archiv ohne .git..."
-tar --exclude='.git' \
-    --exclude='**/bin' \
-    --exclude='**/obj' \
-    --exclude='**/.vs' \
-    --exclude='*.user' \
-    -czf /tmp/doorwatch.tar.gz .
-
-echo "📤 Übertrage zum Server..."
-scp /tmp/doorwatch.tar.gz "$SERVER:/tmp/doorwatch.tar.gz"
-
-echo "📂 Entpacken auf Server..."
-ssh "$SERVER" "mkdir -p $REMOTE_DIR && tar -xzf /tmp/doorwatch.tar.gz -C $REMOTE_DIR"
-
-echo "🐳 Docker Build & Start..."
-ssh "$SERVER" "cd $REMOTE_DIR && docker compose up -d --build"
-
-echo "📋 Letzte Logs:"
-ssh "$SERVER" "docker compose -f $REMOTE_DIR/docker-compose.yml logs --tail=20 doorwatch"
-
-echo "✅ Deploy fertig!"
 ```
+
+The script packages the project, transfers it via SCP, extracts it on the server, and runs `docker compose up -d --build`.
 
 ---
 
-## Schritt 7 — deploy.sh in Rider einbinden
+## Step 7 — Wire deploy.sh into Rider
 
 **File → Settings → Tools → External Tools → +**
 
-| Feld | Wert |
+| Field | Value |
 |---|---|
 | Name | `Deploy DoorWatch` |
 | Program | `C:\Program Files\Git\bin\bash.exe` |
 | Arguments | `deploy.sh` |
 | Working directory | `$ProjectFileDir$` |
 
-Danach erreichbar über **Tools → External Tools → Deploy DoorWatch**.
+After saving, the deploy is available under **Tools → External Tools → Deploy DoorWatch**.
 
 ---
 
-## Schritt 8 — .env auf dem Server anlegen
+## Step 8 — Create the .env file on the server
 
 ```bash
 nano /opt/doorwatch/.env
@@ -125,7 +104,7 @@ nano /opt/doorwatch/.env
 
 ```env
 RTSP_URL=rtsp://user:pass@192.168.1.x/stream
-HA_TOKEN=dein_long_lived_access_token
+HA_TOKEN=your_long_lived_access_token
 ```
 
 ```bash
@@ -134,11 +113,11 @@ chmod 600 /opt/doorwatch/.env
 
 ---
 
-## Schritt 9 — Erster Deploy
+## Step 9 — First deploy
 
-Aus Rider: **Tools → External Tools → Deploy DoorWatch**
+From Rider: **Tools → External Tools → Deploy DoorWatch**
 
-Oder manuell auf Ubuntu:
+Or manually on the server:
 
 ```bash
 cd /opt/doorwatch
@@ -146,15 +125,15 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Der erste Build dauert 10-15 Minuten wegen OpenCV kompilieren — danach ist alles gecacht.
+The first build takes 10–15 minutes because OpenCV is compiled from source. Subsequent builds use Docker's layer cache and are much faster.
 
 ---
 
-## Täglicher Workflow danach
+## Daily workflow
 
 ```
-Code in Rider ändern
-  → Tools → Deploy DoorWatch  (ein Klick)
-  → Script synct + baut auf Ubuntu neu
-  → Portainer unter :9000 zum Überwachen
+Make changes in Rider
+  → Tools → External Tools → Deploy DoorWatch  (one click)
+  → Script syncs and rebuilds on the server
+  → Monitor via Portainer at :9000
 ```

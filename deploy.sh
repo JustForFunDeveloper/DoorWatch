@@ -4,7 +4,7 @@ set -e
 SERVER="atappler@192.168.1.143"
 REMOTE_DIR="/opt/doorwatch"
 
-echo "📦 Erstelle Archiv ohne .git..."
+echo "📦 Creating archive (excluding .git)..."
 tar --exclude='.git' \
     --exclude='**/bin' \
     --exclude='**/obj' \
@@ -12,16 +12,16 @@ tar --exclude='.git' \
     --exclude='*.user' \
     -czf /tmp/doorwatch.tar.gz .
 
-echo "📤 Übertrage zum Server..."
+echo "📤 Transferring to server..."
 scp /tmp/doorwatch.tar.gz "$SERVER:/tmp/doorwatch.tar.gz"
 
-echo "📂 Entpacken auf Server..."
+echo "📂 Extracting on server..."
 ssh "$SERVER" "mkdir -p $REMOTE_DIR && tar -xzf /tmp/doorwatch.tar.gz -C $REMOTE_DIR"
 
-echo "🐳 Docker Build & Start..."
+echo "🐳 Building and starting Docker container..."
 ssh "$SERVER" "cd $REMOTE_DIR && docker compose up -d --build"
 
-echo "📋 Letzte Logs:"
+echo "📋 Recent logs:"
 ssh "$SERVER" "docker compose -f $REMOTE_DIR/docker-compose.yml logs --tail=20 doorwatch"
 
-echo "✅ Deploy fertig!"
+echo "✅ Deploy complete!"
