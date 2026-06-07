@@ -2,8 +2,13 @@ using DoorWatch.Camera;
 using DoorWatch.Core;
 using DoorWatch.HomeAssistant;
 using DoorWatch.Worker;
+using Microsoft.Extensions.Logging.Console;
 
 var builder = Host.CreateApplicationBuilder(args);
+
+builder.Logging
+    .AddConsole(o => o.FormatterName = PipeFormatter.Name)
+    .AddConsoleFormatter<PipeFormatter, SimpleConsoleFormatterOptions>();
 
 var cfg = builder.Configuration.GetSection("DoorWatch");
 

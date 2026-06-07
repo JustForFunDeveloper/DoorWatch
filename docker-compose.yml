@@ -10,15 +10,13 @@ services:
       - .env
     environment:
       - TZ=Europe/Berlin
-      - DoorWatch__FrameIntervalMs=1000
       - DoorWatch__Camera__Source=Rtsp
       - DoorWatch__Camera__RtspUrl=${RTSP_URL}
       - DoorWatch__Detector__Roi__X=932
       - DoorWatch__Detector__Roi__Y=80
       - DoorWatch__Detector__Roi__Width=900
       - DoorWatch__Detector__Roi__Height=250
-      - DoorWatch__Detector__ChangeThresholdPercent=60
-      - DoorWatch__Detector__DebounceFrames=3
+      - DoorWatch__Detector__EdgeChangeThresholdPercent=30
       - DoorWatch__Detector__BaselineImagePath=/data/baseline.png
       - DoorWatch__HomeAssistant__BaseUrl=http://192.168.1.135:8123
       - DoorWatch__HomeAssistant__Token=${HA_TOKEN}

@@ -1,28 +1,39 @@
 namespace DoorWatch.Core;
 
+/// <summary>Configuration for the door detector — ROI, detection method, thresholds, and debounce behaviour.</summary>
 public class DetectorConfig
 {
+    /// <summary>The region of interest within the camera frame that is analysed. Pixels outside this rectangle are ignored.</summary>
     public RoiConfig Roi { get; set; } = new();
 
+    /// <summary>Which detection algorithm drives the door-state decision. Both scores are always computed and logged regardless of this setting.</summary>
     public DetectionMethod Method { get; set; } = DetectionMethod.PixelDiff;
 
-    /// <summary>Minimum % of ROI pixels that must differ (PixelDiff method).</summary>
+    /// <summary>Minimum percentage of ROI pixels that must differ from the baseline to consider the door open (PixelDiff method).</summary>
     public double ChangeThresholdPercent { get; set; } = 10.0;
 
-    /// <summary>Minimum % of ROI pixels with edge changes to consider the door open (EdgeBased method).</summary>
+    /// <summary>Minimum percentage of ROI edge pixels that must differ from the baseline to consider the door open (EdgeBased method).</summary>
     public double EdgeChangeThresholdPercent { get; set; } = 5.0;
 
-    /// <summary>How many consecutive frames must agree before state is committed.</summary>
+    /// <summary>Number of consecutive frames that must agree on the same state before it is committed. Prevents single-frame flicker from triggering Home Assistant.</summary>
     public int DebounceFrames { get; set; } = 3;
 
-    /// <summary>Path to save/load the baseline (closed-door) image.</summary>
+    /// <summary>File path where the baseline (closed-door reference) image is saved and loaded. Delete this file to force a re-capture on next startup.</summary>
     public string BaselineImagePath { get; set; } = "baseline.png";
 }
 
+/// <summary>Defines a rectangular region of interest within the camera frame.</summary>
 public class RoiConfig
 {
+    /// <summary>X coordinate of the top-left corner in pixels.</summary>
     public int X { get; set; }
+
+    /// <summary>Y coordinate of the top-left corner in pixels.</summary>
     public int Y { get; set; }
+
+    /// <summary>Width of the region in pixels.</summary>
     public int Width { get; set; } = 200;
+
+    /// <summary>Height of the region in pixels.</summary>
     public int Height { get; set; } = 200;
 }

@@ -4,6 +4,12 @@ using OpenCvSharp;
 
 namespace DoorWatch.Worker;
 
+/// <summary>
+/// One-shot hosted service activated by the <c>--snapshot</c> command-line flag. Connects to the
+/// configured camera, grabs a single frame, draws the current ROI as a red rectangle, saves the
+/// result as <c>snapshot.png</c>, logs the full frame resolution, and then shuts the application down.
+/// Use this to determine or verify the ROI coordinates before starting the main detection loop.
+/// </summary>
 public sealed class SnapshotWorker : BackgroundService
 {
     private readonly CameraConfig _cameraConfig;

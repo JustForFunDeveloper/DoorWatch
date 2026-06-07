@@ -35,6 +35,7 @@ RUN test -f /opencvsharp/build/libOpenCvSharpExtern.so \
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
+COPY Directory.Build.props .
 COPY ["src/DoorWatch.Worker/DoorWatch.Worker.csproj", "src/DoorWatch.Worker/"]
 COPY ["src/DoorWatch.Core/DoorWatch.Core.csproj", "src/DoorWatch.Core/"]
 COPY ["src/DoorWatch.Camera/DoorWatch.Camera.csproj", "src/DoorWatch.Camera/"]

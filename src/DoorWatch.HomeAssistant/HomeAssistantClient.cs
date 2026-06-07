@@ -4,6 +4,10 @@ using Microsoft.Extensions.Logging;
 
 namespace DoorWatch.HomeAssistant;
 
+/// <summary>
+/// <see cref="IHomeAssistantClient"/> implementation that calls the Home Assistant REST Services API
+/// to turn an entity on or off based on the detected door state.
+/// </summary>
 public sealed class HomeAssistantClient : IHomeAssistantClient
 {
     private readonly HttpClient _http;

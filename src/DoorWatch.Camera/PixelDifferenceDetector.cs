@@ -4,6 +4,11 @@ using OpenCvSharp;
 
 namespace DoorWatch.Camera;
 
+/// <summary>
+/// <see cref="IDoorDetector"/> implementation that uses OpenCvSharp to compare camera frames
+/// against a stored baseline image. Runs a dedicated background thread to continuously grab
+/// frames so that <see cref="Detect"/> never blocks on network latency.
+/// </summary>
 public sealed class PixelDifferenceDetector : IDoorDetector
 {
     private readonly VideoCapture _capture;
@@ -20,6 +25,11 @@ public sealed class PixelDifferenceDetector : IDoorDetector
     private readonly Thread _grabThread;
     private volatile bool _stopping;
 
+    /// <summary>Initialises the detector, opens the camera source, loads any existing baseline, and starts the background grab thread.</summary>
+    /// <param name="cameraConfig">Camera source settings (USB index or RTSP URL).</param>
+    /// <param name="detectorConfig">Detection settings (ROI, method, thresholds, baseline path).</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the camera source cannot be opened.</exception>
     public PixelDifferenceDetector(
         CameraConfig cameraConfig,
         DetectorConfig detectorConfig,

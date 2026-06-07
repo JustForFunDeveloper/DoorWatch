@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.8" />
     <!-- Windows-only native runtime; Linux native lib is injected via Dockerfile -->
     <PackageReference Include="OpenCvSharp4.Windows" Version="4.13.0.20260602" Condition="'$(OS)' == 'Windows_NT'" />
   </ItemGroup>

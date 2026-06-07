@@ -86,9 +86,12 @@ DoorWatch/
     │   └── HomeAssistantClient.cs       # calls /api/services/{domain}/turn_on|off
     └── DoorWatch.Worker/                # Worker Service host
         ├── Program.cs                   # DI wiring + --snapshot flag routing
-        ├── Worker.cs                    # main detection loop
-        ├── SnapshotWorker.cs            # one-shot frame dump for ROI setup
-        └── appsettings.json
+        ├── appsettings.json
+        ├── Logging/
+        │   └── PipeFormatter.cs         # custom console formatter (pipe-separated single-line)
+        └── Workers/
+            ├── Worker.cs                # main detection loop
+            └── SnapshotWorker.cs        # one-shot frame dump for ROI setup
 ```
 
 ---
