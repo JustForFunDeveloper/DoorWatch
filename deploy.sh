@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-SERVER="atappler@192.168.1.143"
+SERVER="user@192.168.1.143"
 REMOTE_DIR="/opt/doorwatch"
 
 echo "📦 Creating archive (excluding .git)..."
