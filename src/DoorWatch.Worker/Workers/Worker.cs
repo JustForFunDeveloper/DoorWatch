@@ -49,8 +49,13 @@ public sealed class DoorWatchWorker : BackgroundService
         _logger.LogInformation("  Detector.Roi             : X={X} Y={Y} W={W} H={H}",
             _detectorConfig.Roi.X, _detectorConfig.Roi.Y,
             _detectorConfig.Roi.Width, _detectorConfig.Roi.Height);
-        _logger.LogInformation("  Detector.PixelDiffThreshold  : {V}%", _detectorConfig.ChangeThresholdPercent);
-        _logger.LogInformation("  Detector.EdgeDiffThreshold   : {V}%", _detectorConfig.EdgeChangeThresholdPercent);
+        _logger.LogInformation("  Detector.PixelDiffThreshold  : open {Open}% / close {Close}%",
+            _detectorConfig.ChangeThresholdPercent,
+            _detectorConfig.ChangeCloseThresholdPercent ?? _detectorConfig.ChangeThresholdPercent);
+        _logger.LogInformation("  Detector.EdgeDiffThreshold   : open {Open}% / close {Close}%",
+            _detectorConfig.EdgeChangeThresholdPercent,
+            _detectorConfig.EdgeCloseThresholdPercent ?? _detectorConfig.EdgeChangeThresholdPercent);
+        _logger.LogInformation("  Detector.NightSaturationThreshold : {V}", _detectorConfig.NightSaturationThreshold);
         _logger.LogInformation("  Detector.DebounceFrames  : {V}", _detectorConfig.DebounceFrames);
         _logger.LogInformation("  Detector.BaselineImagePath   : {V}", _detectorConfig.BaselineImagePath);
         _logger.LogInformation("  HomeAssistant.BaseUrl    : {V}", _haConfig.BaseUrl);
@@ -68,14 +73,14 @@ public sealed class DoorWatchWorker : BackgroundService
 
                 if (result.State != DoorState.Unknown)
                     _logger.LogDebug(
-                        "State: {State} | PixelDiff: {PixelPct:F1}% | EdgeDiff: {EdgePct:F1}%",
-                        result.State, result.PixelDiffPercent, result.EdgeChangedPercent);
+                        "State: {State} ({Lighting}) | PixelDiff: {PixelPct:F1}% | EdgeDiff: {EdgePct:F1}%",
+                        result.State, result.Lighting, result.PixelDiffPercent, result.EdgeChangedPercent);
 
                 if (result.State != _lastReportedState && result.State != DoorState.Unknown)
                 {
                     _logger.LogInformation(
-                        "Door state changed: {Old} → {New} | PixelDiff: {PixelPct:F1}% | EdgeDiff: {EdgePct:F1}%",
-                        _lastReportedState, result.State, result.PixelDiffPercent, result.EdgeChangedPercent);
+                        "Door state changed: {Old} → {New} ({Lighting}) | PixelDiff: {PixelPct:F1}% | EdgeDiff: {EdgePct:F1}%",
+                        _lastReportedState, result.State, result.Lighting, result.PixelDiffPercent, result.EdgeChangedPercent);
 
                     await _haClient.UpdateDoorStateAsync(result.State, stoppingToken);
                     _lastReportedState = result.State;
