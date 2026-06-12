@@ -1,8 +1,17 @@
+# Server-side stack — pulls the prebuilt image from the local registry instead of building.
+# deploy.sh copies this file to the server as docker-compose.yml.
+#
+# Machine-specific values come from /opt/doorwatch/.env on the server:
+#   DOORWATCH_IMAGE  e.g. 192.168.1.x:5000/doorwatch:latest (deploy.sh also exports this)
+#   HA_BASEURL       e.g. http://192.168.1.x:8123
+#   RTSP_URL         camera stream URL including credentials
+#   HA_TOKEN         Home Assistant long-lived access token
+#
+# It can also be pasted into Portainer as a stack: replace the env_file section with
+# the four variables above defined on the stack itself.
 services:
   doorwatch:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOORWATCH_IMAGE}
     restart: unless-stopped
     volumes:
       - doorwatch-data:/data

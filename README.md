@@ -34,7 +34,12 @@ Converts both the current frame and the baseline to greyscale, applies **CLAHE**
 ### EdgeBased
 Runs **Canny edge detection** on both frames, diffs the two edge maps, and reports the percentage of the ROI that shows edge changes. Because edges capture structural boundaries rather than absolute brightness, this method is largely insensitive to lighting changes — a light switching on moves every pixel value but doesn't change where the door frame edge is.
 
+Before Canny runs, each image is Gaussian-blurred (suppresses low-light sensor grain) and CLAHE-normalised, and the Canny thresholds are derived from the image median (auto-Canny) instead of being fixed. This keeps edge density comparable between bright daylight and dim infrared frames.
+
 Both methods only look inside the configured ROI. The rest of the frame is never touched.
+
+### Day/night baselines
+IP cameras switch to greyscale **infrared night vision** in the dark. Comparing an IR frame against a daylight baseline inflates both scores even when the door is closed, so DoorWatch keeps **one baseline per lighting mode** — `baseline-day.png` and `baseline-night.png`. Each frame is classified by its mean colour saturation (IR frames are pure greyscale, so saturation collapses to ~0) and compared against the matching baseline. The first time a lighting mode is seen with no stored baseline, the current frame is captured as that mode's baseline (door assumed closed).
 
 ---
 
@@ -73,12 +78,13 @@ Camera (USB / RTSP over TCP)
   → Home Assistant
 ```
 
-1. **Baseline** — on first run the app saves the current frame as `baseline.png` (door assumed closed). Delete this file any time to force a re-capture.
-2. **ROI** — only the configured rectangle is analysed; movement outside the door area is ignored.
-3. **Method** — set `Detector.Method` to `PixelDiff` or `EdgeBased`. Both scores appear in every log line regardless of which drives the decision.
-4. **Thresholds** — each method has its own threshold because their score scales differ. `ChangeThresholdPercent` applies to PixelDiff; `EdgeChangeThresholdPercent` applies to EdgeBased.
-5. **Debounce** — `DebounceFrames` consecutive frames must agree before state is committed, preventing single-frame flicker from triggering HA.
-6. **Home Assistant** — only called on state *change* (open→closed or closed→open), never on every frame.
+1. **Baselines** — one reference image per lighting mode (`baseline-day.png` / `baseline-night.png`), captured automatically the first time that mode is seen (door assumed closed). Delete a file any time to force a re-capture. A legacy `baseline.png` from older versions is loaded as the day baseline.
+2. **Lighting mode** — each frame is classified as `Day` or `Night` by mean colour saturation (IR night-vision frames are pure greyscale) and compared against the matching baseline. The colour↔IR switch at dusk/dawn resets the debounce so the transition itself can't fake a door event.
+3. **ROI** — only the configured rectangle is analysed; movement outside the door area is ignored.
+4. **Method** — set `Detector.Method` to `PixelDiff` or `EdgeBased`. Both scores appear in every log line regardless of which drives the decision.
+5. **Thresholds with hysteresis** — each method has its own *open* threshold (`ChangeThresholdPercent` / `EdgeChangeThresholdPercent`) and an optional lower *close* threshold (`ChangeCloseThresholdPercent` / `EdgeCloseThresholdPercent`). The door counts as open at or above the open threshold and only counts as closed again at or below the close threshold, so a score hovering around one line can't flap.
+6. **Debounce** — `DebounceFrames` consecutive frames must agree before state is committed, preventing single-frame flicker from triggering HA.
+7. **Home Assistant** — only called on state *change* (open→closed or closed→open), never on every frame.
 
 ---
 
@@ -133,7 +139,10 @@ All settings live in `appsettings.json`. Every key can be overridden with an env
       "Method": "PixelDiff",
       "Roi": { "X": 100, "Y": 100, "Width": 200, "Height": 200 },
       "ChangeThresholdPercent": 10.0,
+      "ChangeCloseThresholdPercent": 7.0,
       "EdgeChangeThresholdPercent": 5.0,
+      "EdgeCloseThresholdPercent": 3.0,
+      "NightSaturationThreshold": 10.0,
       "DebounceFrames": 3,
       "BaselineImagePath": "/data/baseline.png"
     },
@@ -155,9 +164,12 @@ All settings live in `appsettings.json`. Every key can be overridden with an env
 | `Detector.Method` | `PixelDiff` or `EdgeBased` — which score drives the door state |
 | `Detector.Roi` | Rectangle (X, Y, Width, Height) in pixels to analyse |
 | `Detector.ChangeThresholdPercent` | Minimum % of changed pixels to consider door open (PixelDiff) |
+| `Detector.ChangeCloseThresholdPercent` | Optional: % at or below which an open door counts as closed again (PixelDiff hysteresis). Defaults to the open threshold |
 | `Detector.EdgeChangeThresholdPercent` | Minimum % of edge-change pixels to consider door open (EdgeBased) |
+| `Detector.EdgeCloseThresholdPercent` | Optional: % at or below which an open door counts as closed again (EdgeBased hysteresis). Defaults to the open threshold |
+| `Detector.NightSaturationThreshold` | Mean frame saturation (0–255) below which a frame counts as IR night vision. Default 10 |
 | `Detector.DebounceFrames` | Consecutive frames that must agree before state commits |
-| `Detector.BaselineImagePath` | Where to save/load the reference (closed) image |
+| `Detector.BaselineImagePath` | Base path for the reference (closed) images — expanded to `*-day.png` and `*-night.png` |
 | `HomeAssistant.BaseUrl` | HA instance URL |
 | `HomeAssistant.Token` | Long-lived access token |
 | `HomeAssistant.EntityId` | Entity to control, e.g. `light.eg_buero`, `switch.garage` |
@@ -250,12 +262,13 @@ Copy the snapshot to your local machine afterwards:
 docker cp $(docker compose ps -q doorwatch):/data/snapshot.png ./snapshot.png
 ```
 
-### Reset the baseline
-Deletes `baseline.png` from the data volume so it is re-captured on the next startup (door must be closed at that moment):
+### Reset the baselines
+Deletes the baseline images from the data volume so they are re-captured the next time each lighting mode is seen (door must be closed at that moment):
 ```bash
-docker compose exec doorwatch rm /data/baseline.png
+docker compose exec doorwatch sh -c "rm -f /data/baseline-day.png /data/baseline-night.png /data/baseline.png"
 docker compose restart doorwatch
 ```
+You can also delete just one of the two to re-capture only that lighting mode.
 
 ### Stop and clean up
 ```bash
@@ -267,25 +280,26 @@ docker compose down -v   # also delete the data volume (loses baseline and snaps
 
 ## Deployment
 
-For production, DoorWatch runs on a dedicated Ubuntu server (e.g. a mini-PC on the local network). The full server setup guide — Docker installation, Portainer, SSH key setup, `.env` file, and first deploy — is in **[DEPLOYMENT.md](DEPLOYMENT.md)**.
+For production, DoorWatch runs on a dedicated Ubuntu server (e.g. a mini-PC on the local network). Images are built locally, pushed to a private Docker registry on the server, and pulled from there — the server never builds or sees source code. The full setup guide — Docker installation, Portainer, the registry container, SSH key setup, `.env` file, and first deploy — is in **[DEPLOYMENT.md](DEPLOYMENT.md)**.
 
 ### Daily workflow
 
 Deployment is a single click from Rider via an External Tools entry, or one command from any shell:
 
 ```bash
-bash deploy.sh
+bash deploy.sh           # build + push + redeploy :latest
+bash deploy.sh v1.2      # same, but as a version tag (easy rollbacks)
 ```
 
 `deploy.sh` does the following in one shot:
 
-1. Creates a compressed archive of the project (excludes `.git`, `bin/`, `obj/`)
-2. Copies it to the server via `scp`
-3. Extracts it into `/opt/doorwatch` on the server
-4. Runs `docker compose up -d --build` on the server
+1. Builds the Docker image locally (uses your machine's layer cache — fast)
+2. Pushes it to the private registry on the server (only changed layers transfer)
+3. Copies `docker-compose.server.yml` to `/opt/doorwatch` on the server
+4. Runs `docker compose pull && docker compose up -d` on the server
 5. Tails the last 20 log lines so you can confirm the container started correctly
 
-Edit the `SERVER` and `REMOTE_DIR` variables at the top of `deploy.sh` to match your server.
+Server address and registry are configured in a git-ignored `deploy.local` file next to the script (see [DEPLOYMENT.md](DEPLOYMENT.md)) — no machine-specific values are committed. Requires Docker Desktop on the development machine.
 
 ### Secrets on the server
 
@@ -370,7 +384,10 @@ These appear when RTSP frames arrive corrupted due to UDP packet loss. The app f
 - **PixelDiff**: lower `ChangeThresholdPercent` if changes are missed; raise it if lighting variation causes false triggers.
 - **EdgeBased**: lower `EdgeChangeThresholdPercent` if changes are missed. A typical resting value is 1–5%; a clear door open/close event usually moves it to 15–40% depending on the ROI.
 - Try switching `Method` between `PixelDiff` and `EdgeBased` — the logs show both scores at all times so you can compare them without restarting.
-- Delete `baseline.png` to recapture the reference with the door closed.
+- Delete `baseline-day.png` / `baseline-night.png` to recapture the reference with the door closed.
+
+**Detection works during the day but not at night (or vice versa)**
+The baseline for that lighting mode was probably captured with the door open, or is stale. Delete the matching baseline file (`baseline-night.png` for night) and let it re-capture with the door closed. The logs show the active lighting mode (`Day`/`Night`) on every line, so you can confirm the IR switch is being recognised; if it isn't, tune `NightSaturationThreshold` (IR frames score near 0, colour frames much higher).
 
 **Light/switch turns on immediately on startup**
-The baseline was captured while the door was open. Delete `baseline.png` and restart with the door closed.
+The baseline was captured while the door was open. Delete the affected baseline file (`baseline-day.png` or `baseline-night.png`) and restart with the door closed.

@@ -1,27 +1,36 @@
 #!/bin/bash
 set -e
 
-SERVER="user@192.168.1.143"
+# Machine-specific values live in the git-ignored deploy.local file next to this script:
+#
+#   SERVER="user@192.168.1.x"      # SSH login for the server
+#   REGISTRY="192.168.1.x:5000"    # private Docker registry address
+#   REMOTE_DIR="/opt/doorwatch"    # optional, this is the default
+#
 REMOTE_DIR="/opt/doorwatch"
 
-echo "📦 Creating archive (excluding .git)..."
-tar --exclude='.git' \
-    --exclude='**/bin' \
-    --exclude='**/obj' \
-    --exclude='**/.vs' \
-    --exclude='*.user' \
-    -czf /tmp/doorwatch.tar.gz .
+[ -f "$(dirname "$0")/deploy.local" ] && source "$(dirname "$0")/deploy.local"
 
-echo "📤 Transferring to server..."
-scp /tmp/doorwatch.tar.gz "$SERVER:/tmp/doorwatch.tar.gz"
+: "${SERVER:?SERVER is not set — create a deploy.local file (see DEPLOYMENT.md)}"
+: "${REGISTRY:?REGISTRY is not set — create a deploy.local file (see DEPLOYMENT.md)}"
 
-echo "📂 Extracting on server..."
-ssh "$SERVER" "mkdir -p $REMOTE_DIR && tar -xzf /tmp/doorwatch.tar.gz -C $REMOTE_DIR"
+IMAGE="$REGISTRY/doorwatch"
+TAG="${1:-latest}"
 
-echo "🐳 Building and starting Docker container..."
-ssh "$SERVER" "cd $REMOTE_DIR && docker compose up -d --build"
+echo "🐳 Building image locally..."
+docker build -t "$IMAGE:$TAG" .
+
+echo "📤 Pushing $IMAGE:$TAG to registry..."
+docker push "$IMAGE:$TAG"
+
+echo "📂 Updating compose file on server..."
+ssh "$SERVER" "mkdir -p $REMOTE_DIR"
+scp docker-compose.server.yml "$SERVER:$REMOTE_DIR/docker-compose.yml"
+
+echo "🚀 Pulling new image and restarting container..."
+ssh "$SERVER" "cd $REMOTE_DIR && export DOORWATCH_IMAGE='$IMAGE:$TAG' && docker compose pull doorwatch && docker compose up -d"
 
 echo "📋 Recent logs:"
-ssh "$SERVER" "docker compose -f $REMOTE_DIR/docker-compose.yml logs --tail=20 doorwatch"
+ssh "$SERVER" "cd $REMOTE_DIR && export DOORWATCH_IMAGE='$IMAGE:$TAG' && docker compose logs --tail=20 doorwatch"
 
 echo "✅ Deploy complete!"

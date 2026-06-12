@@ -15,6 +15,7 @@ appsettings.*.json
 .env
 .env.*
 !.env.example
+deploy.local
 
 # ---- Runtime outputs ----
 baseline.png
