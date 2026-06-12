@@ -98,7 +98,7 @@ public sealed class PixelDifferenceDetector : IDoorDetector
             double pixelDiffPercent   = ComputePixelDiffPercent(frame, baseline, roi);
             double edgeChangedPercent = ComputeEdgeChangedPercent(frame, baseline, roi);
 
-            DoorState rawState = DecideRawState(pixelDiffPercent, edgeChangedPercent);
+            DoorState rawState = DecideRawState(pixelDiffPercent, edgeChangedPercent, lighting);
             _committedState = Debounce(rawState);
 
             _logger.LogDebug(
@@ -170,21 +170,31 @@ public sealed class PixelDifferenceDetector : IDoorDetector
     /// Applies the active method's threshold with hysteresis: the door only counts as open at or above
     /// the open threshold, and an open door only counts as closed again at or below the (lower) close
     /// threshold. A score hovering around a single line therefore cannot flip the state back and forth.
+    /// At night the optional night thresholds take over, because dim IR frames produce a compressed
+    /// score range that day thresholds may never reach.
     /// </summary>
-    private DoorState DecideRawState(double pixelDiffPercent, double edgeChangedPercent)
+    private DoorState DecideRawState(double pixelDiffPercent, double edgeChangedPercent, LightingMode lighting)
     {
-        double score, openThreshold, closeThreshold;
-        if (_config.Method == DetectionMethod.EdgeBased)
+        bool edgeBased = _config.Method == DetectionMethod.EdgeBased;
+        double score = edgeBased ? edgeChangedPercent : pixelDiffPercent;
+
+        double dayOpen   = edgeBased ? _config.EdgeChangeThresholdPercent : _config.ChangeThresholdPercent;
+        double dayClose  = (edgeBased ? _config.EdgeCloseThresholdPercent : _config.ChangeCloseThresholdPercent) ?? dayOpen;
+        double? nightOpen  = edgeBased ? _config.NightEdgeChangeThresholdPercent : _config.NightChangeThresholdPercent;
+        double? nightClose = edgeBased ? _config.NightEdgeCloseThresholdPercent : _config.NightChangeCloseThresholdPercent;
+
+        double openThreshold, closeThreshold;
+        if (lighting == LightingMode.Night && nightOpen is { } nightOpenValue)
         {
-            score          = edgeChangedPercent;
-            openThreshold  = _config.EdgeChangeThresholdPercent;
-            closeThreshold = _config.EdgeCloseThresholdPercent ?? openThreshold;
+            openThreshold  = nightOpenValue;
+            // Deliberately not falling back to the day close threshold: it can sit above the
+            // night open threshold, which would lock the state permanently open.
+            closeThreshold = nightClose ?? nightOpenValue;
         }
         else
         {
-            score          = pixelDiffPercent;
-            openThreshold  = _config.ChangeThresholdPercent;
-            closeThreshold = _config.ChangeCloseThresholdPercent ?? openThreshold;
+            openThreshold  = dayOpen;
+            closeThreshold = dayClose;
         }
 
         return _committedState == DoorState.Open

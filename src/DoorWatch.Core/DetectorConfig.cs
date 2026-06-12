@@ -30,6 +30,32 @@ public class DetectorConfig
     public double? EdgeCloseThresholdPercent { get; set; }
 
     /// <summary>
+    /// Open-threshold override used while the frame is classified as Night (PixelDiff method).
+    /// Dim IR frames produce a compressed score range, so night thresholds typically sit well below the
+    /// day ones. When unset, the day threshold applies at night too.
+    /// </summary>
+    public double? NightChangeThresholdPercent { get; set; }
+
+    /// <summary>
+    /// Close-threshold override used at Night (PixelDiff method). Only takes effect when
+    /// <see cref="NightChangeThresholdPercent"/> is set; defaults to that value (no hysteresis) when unset.
+    /// </summary>
+    public double? NightChangeCloseThresholdPercent { get; set; }
+
+    /// <summary>
+    /// Open-threshold override used while the frame is classified as Night (EdgeBased method).
+    /// Dim IR frames produce a compressed score range, so night thresholds typically sit well below the
+    /// day ones. When unset, the day threshold applies at night too.
+    /// </summary>
+    public double? NightEdgeChangeThresholdPercent { get; set; }
+
+    /// <summary>
+    /// Close-threshold override used at Night (EdgeBased method). Only takes effect when
+    /// <see cref="NightEdgeChangeThresholdPercent"/> is set; defaults to that value (no hysteresis) when unset.
+    /// </summary>
+    public double? NightEdgeCloseThresholdPercent { get; set; }
+
+    /// <summary>
     /// Mean colour saturation (0–255, measured over the whole frame) below which a frame is classified as
     /// infrared night-vision. IR frames are pure greyscale so their saturation is near zero, while daylight
     /// colour frames score far higher.

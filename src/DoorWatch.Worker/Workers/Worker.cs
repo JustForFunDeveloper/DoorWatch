@@ -55,6 +55,12 @@ public sealed class DoorWatchWorker : BackgroundService
         _logger.LogInformation("  Detector.EdgeDiffThreshold   : open {Open}% / close {Close}%",
             _detectorConfig.EdgeChangeThresholdPercent,
             _detectorConfig.EdgeCloseThresholdPercent ?? _detectorConfig.EdgeChangeThresholdPercent);
+        if (_detectorConfig.NightEdgeChangeThresholdPercent is { } nightEdgeOpen)
+            _logger.LogInformation("  Detector.NightEdgeDiffThreshold : open {Open}% / close {Close}%",
+                nightEdgeOpen, _detectorConfig.NightEdgeCloseThresholdPercent ?? nightEdgeOpen);
+        if (_detectorConfig.NightChangeThresholdPercent is { } nightPixelOpen)
+            _logger.LogInformation("  Detector.NightPixelDiffThreshold : open {Open}% / close {Close}%",
+                nightPixelOpen, _detectorConfig.NightChangeCloseThresholdPercent ?? nightPixelOpen);
         _logger.LogInformation("  Detector.NightSaturationThreshold : {V}", _detectorConfig.NightSaturationThreshold);
         _logger.LogInformation("  Detector.DebounceFrames  : {V}", _detectorConfig.DebounceFrames);
         _logger.LogInformation("  Detector.BaselineImagePath   : {V}", _detectorConfig.BaselineImagePath);

@@ -142,6 +142,8 @@ All settings live in `appsettings.json`. Every key can be overridden with an env
       "ChangeCloseThresholdPercent": 7.0,
       "EdgeChangeThresholdPercent": 5.0,
       "EdgeCloseThresholdPercent": 3.0,
+      "NightEdgeChangeThresholdPercent": 3.0,
+      "NightEdgeCloseThresholdPercent": 2.0,
       "NightSaturationThreshold": 10.0,
       "DebounceFrames": 3,
       "BaselineImagePath": "/data/baseline.png"
@@ -167,6 +169,8 @@ All settings live in `appsettings.json`. Every key can be overridden with an env
 | `Detector.ChangeCloseThresholdPercent` | Optional: % at or below which an open door counts as closed again (PixelDiff hysteresis). Defaults to the open threshold |
 | `Detector.EdgeChangeThresholdPercent` | Minimum % of edge-change pixels to consider door open (EdgeBased) |
 | `Detector.EdgeCloseThresholdPercent` | Optional: % at or below which an open door counts as closed again (EdgeBased hysteresis). Defaults to the open threshold |
+| `Detector.NightChangeThresholdPercent` / `NightChangeCloseThresholdPercent` | Optional PixelDiff threshold overrides applied while the frame is IR night vision. Unset = day thresholds apply at night too |
+| `Detector.NightEdgeChangeThresholdPercent` / `NightEdgeCloseThresholdPercent` | Optional EdgeBased threshold overrides applied at night. Dim IR frames have a compressed score range, so these usually sit well below the day values |
 | `Detector.NightSaturationThreshold` | Mean frame saturation (0–255) below which a frame counts as IR night vision. Default 10 |
 | `Detector.DebounceFrames` | Consecutive frames that must agree before state commits |
 | `Detector.BaselineImagePath` | Base path for the reference (closed) images — expanded to `*-day.png` and `*-night.png` |

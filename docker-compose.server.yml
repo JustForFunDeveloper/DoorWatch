@@ -28,6 +28,8 @@ services:
       - DoorWatch__Detector__Roi__Height=250
       - DoorWatch__Detector__EdgeChangeThresholdPercent=18
       - DoorWatch__Detector__EdgeCloseThresholdPercent=10
+      - DoorWatch__Detector__NightEdgeChangeThresholdPercent=9
+      - DoorWatch__Detector__NightEdgeCloseThresholdPercent=7
       - DoorWatch__Detector__BaselineImagePath=/data/baseline.png
       - DoorWatch__HomeAssistant__BaseUrl=${HA_BASEURL}
       - DoorWatch__HomeAssistant__Token=${HA_TOKEN}
