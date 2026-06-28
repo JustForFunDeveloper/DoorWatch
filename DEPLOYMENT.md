@@ -199,6 +199,14 @@ bash deploy.sh
 
 The first local build takes 10–15 minutes because OpenCV is compiled from source; subsequent builds reuse Docker's layer cache and are much faster. The first push uploads the full image; later pushes only transfer changed layers.
 
+Once the container is up, confirm it is healthy from the server (or any LAN machine):
+
+```bash
+curl http://192.168.1.x:8088/status   # live scores, thresholds, frame age, connection state
+```
+
+See [Diagnostics endpoint](README.md#diagnostics-endpoint) for what the fields mean.
+
 ---
 
 ## Daily workflow

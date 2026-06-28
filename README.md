@@ -12,6 +12,7 @@ It uses **computer-vision detection** — no ML model, no cloud dependency. A re
 - [How it works](#how-it-works)
 - [Project structure](#project-structure)
 - [Configuration](#configuration)
+- [Diagnostics endpoint](#diagnostics-endpoint)
 - [Getting started](#getting-started)
   - [1. Find your ROI](#1-find-your-roi)
   - [2. Create a Home Assistant long-lived access token](#2-create-a-home-assistant-long-lived-access-token)
@@ -80,6 +81,8 @@ Camera (USB / RTSP over TCP)
 
 1. **Baselines** — one reference image per lighting mode (`baseline-day.png` / `baseline-night.png`), captured automatically the first time that mode is seen (door assumed closed). Delete a file any time to force a re-capture. A legacy `baseline.png` from older versions is loaded as the day baseline.
 2. **Lighting mode** — each frame is classified as `Day` or `Night` by mean colour saturation (IR night-vision frames are pure greyscale) and compared against the matching baseline. The colour↔IR switch at dusk/dawn resets the debounce so the transition itself can't fake a door event.
+
+   A dead RTSP/FFMPEG handle never recovers on its own, so the background grab thread watches for a streak of failed grabs and **reopens the camera source automatically** with a capped backoff (1→2→5→10 s) instead of looping forever — no container restart needed. While the feed is down, any frame older than `StaleFrameSeconds` is treated as stale and reported as `Unknown` rather than re-scored, so a frozen image can't masquerade as a live, unchanging reading.
 3. **ROI** — only the configured rectangle is analysed; movement outside the door area is ignored.
 4. **Method** — set `Detector.Method` to `PixelDiff` or `EdgeBased`. Both scores appear in every log line regardless of which drives the decision.
 5. **Thresholds with hysteresis** — each method has its own *open* threshold (`ChangeThresholdPercent` / `EdgeChangeThresholdPercent`) and an optional lower *close* threshold (`ChangeCloseThresholdPercent` / `EdgeCloseThresholdPercent`). The door counts as open at or above the open threshold and only counts as closed again at or below the close threshold, so a score hovering around one line can't flap.
@@ -92,15 +95,17 @@ Camera (USB / RTSP over TCP)
 
 ```
 DoorWatch/
-├── DoorWatch.sln
+├── DoorWatch.slnx
 ├── Dockerfile
-├── docker-compose.yml
+├── docker-compose.yml                  # local build-and-run stack
+├── docker-compose.server.yml           # server stack — pulls the prebuilt image from the registry
 ├── .dockerignore
 └── src/
     ├── DoorWatch.Core/                  # pure models & interfaces, no framework deps
     │   ├── DoorState.cs                 # enum: Unknown / Closed / Open
     │   ├── DetectionMethod.cs           # enum: PixelDiff / EdgeBased
     │   ├── DetectionResult.cs           # record: state + pixelDiff% + edgeDiff% + timestamp
+    │   ├── DetectionStatus.cs           # thread-safe live status holder behind the /status endpoint
     │   ├── DetectorConfig.cs            # ROI, method, thresholds, debounce, baseline path
     │   └── IDoorDetector.cs
     ├── DoorWatch.Camera/                # OpenCvSharp4
@@ -111,7 +116,7 @@ DoorWatch/
     │   ├── IHomeAssistantClient.cs
     │   └── HomeAssistantClient.cs       # calls /api/services/{domain}/turn_on|off
     └── DoorWatch.Worker/                # Worker Service host
-        ├── Program.cs                   # DI wiring + --snapshot flag routing
+        ├── Program.cs                   # DI wiring + /status & /healthz endpoints + --snapshot flag routing
         ├── appsettings.json
         ├── Logging/
         │   └── PipeFormatter.cs         # custom console formatter (pipe-separated single-line)
@@ -146,6 +151,7 @@ All settings live in `appsettings.json`. Every key can be overridden with an env
       "NightEdgeCloseThresholdPercent": 2.0,
       "NightSaturationThreshold": 10.0,
       "DebounceFrames": 3,
+      "StaleFrameSeconds": 10.0,
       "BaselineImagePath": "/data/baseline.png"
     },
     "HomeAssistant": {
@@ -173,12 +179,44 @@ All settings live in `appsettings.json`. Every key can be overridden with an env
 | `Detector.NightEdgeChangeThresholdPercent` / `NightEdgeCloseThresholdPercent` | Optional EdgeBased threshold overrides applied at night. Dim IR frames have a compressed score range, so these usually sit well below the day values |
 | `Detector.NightSaturationThreshold` | Mean frame saturation (0–255) below which a frame counts as IR night vision. Default 10 |
 | `Detector.DebounceFrames` | Consecutive frames that must agree before state commits |
+| `Detector.StaleFrameSeconds` | Age (s) beyond which the latest frame is considered frozen; detection reports `Unknown` instead of re-scoring a stale image. Default 10 |
 | `Detector.BaselineImagePath` | Base path for the reference (closed) images — expanded to `*-day.png` and `*-night.png` |
 | `HomeAssistant.BaseUrl` | HA instance URL |
 | `HomeAssistant.Token` | Long-lived access token |
 | `HomeAssistant.EntityId` | Entity to control, e.g. `light.eg_buero`, `switch.garage` |
 
 > The `EntityId` domain prefix (`light`, `switch`, `input_boolean`, …) is parsed automatically to build the correct service URL.
+
+---
+
+## Diagnostics endpoint
+
+The container exposes two read-only HTTP endpoints so you can inspect what the detector currently sees **without enabling debug logging or restarting** — useful when the state seems stuck and you need to know whether the score is wrong or the feed is frozen. They listen on container port `8080`, mapped to host port `8088` in `docker-compose.yml`.
+
+```bash
+curl http://localhost:8088/status     # full JSON snapshot of the latest detection cycle
+curl http://localhost:8088/healthz    # 200 if the latest frame is fresh, 503 if it looks frozen
+```
+
+`/status` returns the last computed scores, the thresholds that were actually in effect, the lighting mode, frame freshness, and the camera connection state:
+
+```json
+{
+  "state": "Closed", "rawState": "Closed",
+  "pixelDiffPercent": 3.2, "edgeChangedPercent": 4.1,
+  "lighting": "Day", "method": "EdgeBased",
+  "openThreshold": 18.0, "closeThreshold": 10.0,
+  "connection": "Connected", "consecutiveGrabFailures": 0,
+  "frameAgeMs": 420, "lastStateChangeUtc": "2026-06-28T09:12:04Z"
+}
+```
+
+This single payload tells the two failure modes apart at a glance:
+
+- **Camera feed frozen** — a large `frameAgeMs` and/or `"connection": "Reconnecting"`. The grab thread is reopening the source; detection reports `Unknown` until it recovers.
+- **Score wrong / mis-tuned** — a fresh `frameAgeMs` but a score that doesn't match reality next to the listed `openThreshold` / `closeThreshold`. Re-check the ROI, baseline, and thresholds (see [Troubleshooting](#troubleshooting)).
+
+`/healthz` is suitable as a Docker/Portainer health check — it returns `503` once the latest frame is older than `StaleFrameSeconds`.
 
 ---
 
@@ -382,7 +420,11 @@ These appear when RTSP frames arrive corrupted due to UDP packet loss. The app f
 - USB: check `DeviceIndex` (0 = `/dev/video0`). In Docker the device must be mapped in `docker-compose.yml`.
 - RTSP: verify the URL and credentials with VLC first (`Media → Open Network Stream`).
 
+**Camera connection drops and the log fills with `Camera grab failed — retrying`**
+A transient network glitch or camera reboot can leave the RTSP/FFMPEG handle permanently dead. DoorWatch now detects a sustained failure streak and **reopens the source automatically** with a capped backoff, logging `reopening source` and then `Camera stream recovered` once frames return — no container restart required. Check `connection` in `/status`: `Reconnecting` means it's mid-recovery. If it never recovers, the camera itself is unreachable — verify it's online and reachable from the server (`ping`, then VLC).
+
 **Door state never changes**
+- `curl http://localhost:8088/status` first — it shows the live scores, the thresholds in effect, the frame age, and the connection state without enabling debug logging. A large `frameAgeMs` means the feed is frozen (see below), not that the maths is wrong.
 - Run `--snapshot` and confirm the ROI rectangle sits over the door gap.
 - Check the debug logs — both `PixelDiff` and `EdgeDiff` scores are logged on every frame, which helps identify whether the scores are moving at all.
 - **PixelDiff**: lower `ChangeThresholdPercent` if changes are missed; raise it if lighting variation causes false triggers.

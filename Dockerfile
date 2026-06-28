@@ -63,4 +63,7 @@ ENV LD_LIBRARY_PATH=/app
 
 VOLUME ["/data"]
 
+# Diagnostics HTTP endpoints (/status, /healthz). Mapped to the host in docker-compose.
+EXPOSE 8080
+
 ENTRYPOINT ["dotnet", "DoorWatch.Worker.dll"]

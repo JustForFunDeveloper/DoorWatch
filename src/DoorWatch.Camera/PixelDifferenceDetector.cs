@@ -13,8 +13,10 @@ namespace DoorWatch.Camera;
 /// </summary>
 public sealed class PixelDifferenceDetector : IDoorDetector
 {
-    private readonly VideoCapture _capture;
+    private VideoCapture _capture;
+    private readonly CameraConfig _cameraConfig;
     private readonly DetectorConfig _config;
+    private readonly DetectionStatus _status;
     private readonly ILogger<PixelDifferenceDetector> _logger;
 
     private Mat? _baselineDay;
@@ -25,9 +27,14 @@ public sealed class PixelDifferenceDetector : IDoorDetector
     private int _candidateCount;
 
     private Mat? _latestFrame;
+    private DateTimeOffset _latestFrameUtc;
     private readonly object _frameLock = new();
     private readonly Thread _grabThread;
     private volatile bool _stopping;
+
+    // ~2 s of failed grabs at the 100 ms retry cadence before we tear down and reopen the source.
+    private const int FailuresBeforeReconnect = 20;
+    private static readonly int[] ReconnectBackoffSeconds = [1, 2, 5, 10];
 
     /// <summary>Initialises the detector, opens the camera source, loads any existing baselines, and starts the background grab thread.</summary>
     /// <param name="cameraConfig">Camera source settings (USB index or RTSP URL).</param>
@@ -37,17 +44,18 @@ public sealed class PixelDifferenceDetector : IDoorDetector
     public PixelDifferenceDetector(
         CameraConfig cameraConfig,
         DetectorConfig detectorConfig,
+        DetectionStatus status,
         ILogger<PixelDifferenceDetector> logger)
     {
+        _cameraConfig = cameraConfig;
         _config = detectorConfig;
+        _status = status;
         _logger = logger;
 
         // Force RTSP over TCP to avoid H.264 decode errors caused by UDP packet loss
         Environment.SetEnvironmentVariable("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp");
 
-        _capture = cameraConfig.Source == CameraSourceType.Rtsp
-            ? new VideoCapture(cameraConfig.RtspUrl, VideoCaptureAPIs.FFMPEG)
-            : new VideoCapture(cameraConfig.DeviceIndex);
+        _capture = OpenCapture();
 
         if (!_capture.IsOpened())
             throw new InvalidOperationException("Failed to open camera source.");
@@ -58,17 +66,34 @@ public sealed class PixelDifferenceDetector : IDoorDetector
         _grabThread.Start();
     }
 
+    private VideoCapture OpenCapture() =>
+        _cameraConfig.Source == CameraSourceType.Rtsp
+            ? new VideoCapture(_cameraConfig.RtspUrl, VideoCaptureAPIs.FFMPEG)
+            : new VideoCapture(_cameraConfig.DeviceIndex);
+
     public DetectionResult Detect()
     {
         Mat? frame;
+        DateTimeOffset frameUtc;
         lock (_frameLock)
         {
             frame = _latestFrame?.Clone();
+            frameUtc = _latestFrameUtc;
         }
 
         if (frame is null)
         {
             _logger.LogWarning("No frame available yet from camera.");
+            return new DetectionResult(DoorState.Unknown, 0, 0, _lastLighting ?? LightingMode.Day, DateTimeOffset.UtcNow);
+        }
+
+        var frameAge = DateTimeOffset.UtcNow - frameUtc;
+        if (frameAge > TimeSpan.FromSeconds(_config.StaleFrameSeconds))
+        {
+            frame.Dispose();
+            _logger.LogWarning(
+                "Latest frame is {Age:F0}s old (> {Limit}s) — camera feed appears frozen; reporting Unknown.",
+                frameAge.TotalSeconds, _config.StaleFrameSeconds);
             return new DetectionResult(DoorState.Unknown, 0, 0, _lastLighting ?? LightingMode.Day, DateTimeOffset.UtcNow);
         }
 
@@ -98,14 +123,16 @@ public sealed class PixelDifferenceDetector : IDoorDetector
             double pixelDiffPercent   = ComputePixelDiffPercent(frame, baseline, roi);
             double edgeChangedPercent = ComputeEdgeChangedPercent(frame, baseline, roi);
 
-            DoorState rawState = DecideRawState(pixelDiffPercent, edgeChangedPercent, lighting);
+            DoorState rawState = DecideRawState(pixelDiffPercent, edgeChangedPercent, lighting, out double openThreshold, out double closeThreshold);
             _committedState = Debounce(rawState);
 
             _logger.LogDebug(
                 "Frame analysed: {State} ({Lighting}) | PixelDiff: {PixelPct:F1}% | EdgeDiff: {EdgePct:F1}%",
                 rawState, lighting, pixelDiffPercent, edgeChangedPercent);
 
-            return new DetectionResult(_committedState, pixelDiffPercent, edgeChangedPercent, lighting, DateTimeOffset.UtcNow);
+            var result = new DetectionResult(_committedState, pixelDiffPercent, edgeChangedPercent, lighting, DateTimeOffset.UtcNow);
+            _status.RecordDetection(result, rawState, _config.Method, openThreshold, closeThreshold);
+            return result;
         }
     }
 
@@ -130,24 +157,92 @@ public sealed class PixelDifferenceDetector : IDoorDetector
 
     private void GrabLoop()
     {
+        int consecutiveFailures = 0;
+        int backoffIndex = 0;
+
         while (!_stopping)
         {
             var frame = new Mat();
             if (_capture.Read(frame) && !frame.Empty())
             {
+                var now = DateTimeOffset.UtcNow;
                 lock (_frameLock)
                 {
                     _latestFrame?.Dispose();
                     _latestFrame = frame;
+                    _latestFrameUtc = now;
                 }
+
+                if (consecutiveFailures > 0)
+                    _logger.LogInformation("Camera stream recovered after {Count} failed grab(s).", consecutiveFailures);
+
+                consecutiveFailures = 0;
+                backoffIndex = 0;
+                _status.RecordGrabSuccess(now);
             }
             else
             {
                 frame.Dispose();
-                _logger.LogWarning("Camera grab failed — retrying.");
-                Thread.Sleep(100);
+                consecutiveFailures++;
+                _status.RecordGrabFailure();
+
+                // Log once when the stream first goes bad; the periodic reconnect logs cover the rest,
+                // so we don't flood the log 10×/second the way the old loop did.
+                if (consecutiveFailures == 1)
+                    _logger.LogWarning("Camera grab failed — retrying.");
+
+                if (consecutiveFailures >= FailuresBeforeReconnect)
+                {
+                    int waitSeconds = ReconnectBackoffSeconds[Math.Min(backoffIndex, ReconnectBackoffSeconds.Length - 1)];
+                    _status.RecordReconnecting();
+                    _logger.LogWarning(
+                        "Camera stream appears dead after {Count} failed grabs — reopening source, next retry in {Wait}s.",
+                        consecutiveFailures, waitSeconds);
+
+                    Reconnect();
+                    backoffIndex++;
+                    consecutiveFailures = 0;
+
+                    if (Wait(TimeSpan.FromSeconds(waitSeconds)))
+                        break;
+                }
+                else
+                {
+                    if (Wait(TimeSpan.FromMilliseconds(100)))
+                        break;
+                }
             }
         }
+    }
+
+    /// <summary>Disposes the current capture and opens a fresh one. A dead RTSP/FFMPEG handle never
+    /// recovers on its own, so reconnecting is the only way to resume grabbing without a restart.</summary>
+    private void Reconnect()
+    {
+        try { _capture.Dispose(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Error disposing camera capture during reconnect."); }
+
+        try
+        {
+            _capture = OpenCapture();
+            if (_capture.IsOpened())
+                _logger.LogInformation("Camera source reopened.");
+            else
+                _logger.LogWarning("Reconnect attempt could not open the camera source — will retry.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reopening camera source during reconnect.");
+        }
+    }
+
+    /// <summary>Sleeps in short slices so a stop request is honoured promptly. Returns true if stopping.</summary>
+    private bool Wait(TimeSpan duration)
+    {
+        var deadline = DateTime.UtcNow + duration;
+        while (!_stopping && DateTime.UtcNow < deadline)
+            Thread.Sleep(Math.Min(100, (int)Math.Max(1, (deadline - DateTime.UtcNow).TotalMilliseconds)));
+        return _stopping;
     }
 
     /// <summary>
@@ -173,7 +268,7 @@ public sealed class PixelDifferenceDetector : IDoorDetector
     /// At night the optional night thresholds take over, because dim IR frames produce a compressed
     /// score range that day thresholds may never reach.
     /// </summary>
-    private DoorState DecideRawState(double pixelDiffPercent, double edgeChangedPercent, LightingMode lighting)
+    private DoorState DecideRawState(double pixelDiffPercent, double edgeChangedPercent, LightingMode lighting, out double openThreshold, out double closeThreshold)
     {
         bool edgeBased = _config.Method == DetectionMethod.EdgeBased;
         double score = edgeBased ? edgeChangedPercent : pixelDiffPercent;
@@ -183,7 +278,6 @@ public sealed class PixelDifferenceDetector : IDoorDetector
         double? nightOpen  = edgeBased ? _config.NightEdgeChangeThresholdPercent : _config.NightChangeThresholdPercent;
         double? nightClose = edgeBased ? _config.NightEdgeCloseThresholdPercent : _config.NightChangeCloseThresholdPercent;
 
-        double openThreshold, closeThreshold;
         if (lighting == LightingMode.Night && nightOpen is { } nightOpenValue)
         {
             openThreshold  = nightOpenValue;

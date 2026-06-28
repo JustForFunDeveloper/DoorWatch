@@ -13,6 +13,7 @@ public sealed class DoorWatchWorker : BackgroundService
 {
     private readonly IDoorDetector _detector;
     private readonly IHomeAssistantClient _haClient;
+    private readonly DetectionStatus _status;
     private readonly ILogger<DoorWatchWorker> _logger;
     private readonly int _frameIntervalMs;
     private readonly CameraConfig _cameraConfig;
@@ -24,6 +25,7 @@ public sealed class DoorWatchWorker : BackgroundService
     public DoorWatchWorker(
         IDoorDetector detector,
         IHomeAssistantClient haClient,
+        DetectionStatus status,
         IConfiguration config,
         CameraConfig cameraConfig,
         DetectorConfig detectorConfig,
@@ -32,6 +34,7 @@ public sealed class DoorWatchWorker : BackgroundService
     {
         _detector = detector;
         _haClient = haClient;
+        _status = status;
         _logger = logger;
         _cameraConfig = cameraConfig;
         _detectorConfig = detectorConfig;
@@ -90,6 +93,7 @@ public sealed class DoorWatchWorker : BackgroundService
 
                     await _haClient.UpdateDoorStateAsync(result.State, stoppingToken);
                     _lastReportedState = result.State;
+                    _status.RecordStateReported(result.State, DateTimeOffset.UtcNow);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

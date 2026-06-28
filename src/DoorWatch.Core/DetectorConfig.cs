@@ -66,6 +66,13 @@ public class DetectorConfig
     public int DebounceFrames { get; set; } = 3;
 
     /// <summary>
+    /// Age beyond which the latest grabbed frame is considered stale. When the most recent frame is older
+    /// than this, <see cref="DoorState.Unknown"/> is returned instead of re-scoring a frozen image — so a
+    /// dropped camera feed cannot masquerade as a valid, unchanging reading.
+    /// </summary>
+    public double StaleFrameSeconds { get; set; } = 10.0;
+
+    /// <summary>
     /// Base file path for the baseline (closed-door reference) images. One baseline is kept per lighting mode
     /// by inserting a suffix before the extension (e.g. <c>baseline.png</c> → <c>baseline-day.png</c> and
     /// <c>baseline-night.png</c>). Delete a file to force a re-capture the next time that lighting mode is seen.

@@ -13,6 +13,9 @@ services:
   doorwatch:
     image: ${DOORWATCH_IMAGE}
     restart: unless-stopped
+    ports:
+      # Diagnostics: curl http://<host>:8088/status and /healthz
+      - "8088:8080"
     volumes:
       - doorwatch-data:/data
     env_file:
